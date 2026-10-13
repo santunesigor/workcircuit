@@ -1,16 +1,22 @@
 # WorkCircuit
 
+[English](README.md) · [Português (Brasil)](README.pt-BR.md)
+
 A small offline Linux desktop companion for rotating between projects and knowing where your time went.
 
 When an AI assistant is working on one project, move to the next without losing your place. WorkCircuit keeps an ordered task rotation, measures your work, and stays beside your other windows in a compact companion view.
 
-**Version 0.1.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Changelog](CHANGELOG.md)
+**Latest release: 0.1.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Changelog](CHANGELOG.md)
+
+Task completion and temporary tasks are currently available in the source build; they are not included in the 0.1.0 release archive.
 
 Cloud synchronization and APT/Snap publishing are planned, not available.
 
 ## What it does
 
 - Create tasks with a required title and optional description; edit, reorder, archive and restore them.
+- Complete finished tasks, preserve their reports, and reopen them when needed.
+- Start a temporary task with just a name for an unexpected meeting or interruption; it completes automatically when you move on.
 - Start a task, advance through a circular queue, or jump directly to another task.
 - Pause for a break and resume explicitly. Only one task counts time at a time.
 - Configure recurring breaks by weekday and local time, including overnight ranges.
@@ -61,12 +67,22 @@ SQLite is compiled into the application; PostgreSQL and a separate SQLite instal
 
 1. Add the projects you are working on and arrange their order with the up/down controls.
 2. Select a task and press **Start**. Selection while paused does not begin counting.
-3. Press **Next** to end the current session and start the next task at the same instant. After the last task, the queue wraps to the first. With one task, Next keeps the current visit running.
+3. Press **Next** to end the current session and start the next task at the same instant. After the last task, the queue wraps to the first. With one regular task, Next keeps the current visit running.
 4. Use a task's selection button to jump to it. Skipped tasks receive no time, and the next advance continues from the selected task.
 5. Press **Pause** for an unscheduled break, and **Resume** when you return.
 6. Open **Reports**, enter an inclusive local-date range, and view or export the result. Press **Show** again to refresh a running session's contribution.
 
+Press **Complete** in the dashboard, or the checkmark beside a task, when its work is finished. The companion has the same checkmark in its header. Completed tasks leave the rotation and task picker, and move to **Completed tasks** in the dashboard. Completing the current task starts the next task at the same instant if tracking was running; while paused, it selects the next task without starting it. Completing the last task stops tracking. **Reopen** returns a completed task to the end of the queue with its original identity and time history. Completion and archival are separate states; both preserve reports and CSV exports.
+
 The main timer displays accumulated work during the current task visit, excluding pauses. Switching to a different task resets this visit timer. Reports retain all sessions, including those for archived tasks. Archiving the current task pauses tracking. Restore archived tasks from the dashboard to return them to the end of the queue.
+
+### Temporary tasks for interruptions
+
+Press **Temporary Task** in the dashboard or **+** in the companion, enter a name, and press **Start Now** (or Enter). Tracking starts immediately, even if you were paused, and the previous running session ends at the same instant. Closing the dialog without starting leaves your work unchanged.
+
+The temporary task is inserted just before the interrupted task. **Next** completes it automatically and returns to that task, preserving the regular queue's order. Selecting another task also completes the temporary one. If no other active task exists, Next completes it and stops tracking. Starting a second temporary task completes the previous one.
+
+Manual pauses, scheduled breaks, suspend and restart do not complete temporary work. Resume it when ready, then advance or switch tasks to finish. Creation is blocked during a scheduled break. Completed temporary tasks remain in **Completed tasks**, reports and CSV exports; reopening one retains its temporary behavior.
 
 ### Companion window on GNOME
 

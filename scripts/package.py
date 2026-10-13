@@ -38,7 +38,7 @@ def main():
         release = Path(temporary) / name
         release.mkdir()
         shutil.copy2(binary, release / "workcircuit")
-        for filename in ("README.md", "CHANGELOG.md"):
+        for filename in ("README.md", "README.pt-BR.md", "CHANGELOG.md"):
             shutil.copy2(ROOT / filename, release / filename)
         shutil.copy2(ROOT / "scripts/install.sh", release / "install.sh")
         (release / "install.sh").chmod(0o755)
