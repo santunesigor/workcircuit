@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=WorkCircuit
+Comment=Rotate tasks and track your work offline
+Exec=workcircuit
+Icon=io.github.workcircuit.WorkCircuit-chevron-symbolic
+Terminal=false
+Categories=Office;GTK;
+Keywords=tasks;time;focus;rotation;
+StartupNotify=true
+DBusActivatable=false

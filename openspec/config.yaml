@@ -1,0 +1,6 @@
+schema: spec-driven
+context: |
+  WorkCircuit is an offline Linux desktop task rotation and time tracking app.
+  Rust, GTK4/libadwaita, SQLite. UI defaults to English and supports persisted pt-BR selection; documentation is English.
+  Preserve future personal multi-PC synchronization without implementing a backend now.
+  Keep changes small, business rules independent of the UI, and specs testable.
