@@ -75,6 +75,353 @@ fn single_task_next_is_noop() {
 }
 
 #[test]
+fn temporary_task_interrupts_and_returns_to_the_same_rotation_position() {
+    let mut c = core();
+    let ids = tasks(&mut c);
+    c.select(ids[1], at(0)).unwrap();
+    c.start(at(0)).unwrap();
+    let temporary = c
+        .add_temporary_task("  Unexpected meeting  ", at(5))
+        .unwrap();
+    assert_eq!(c.current().unwrap().title, "Unexpected meeting");
+    assert!(c.current().unwrap().temporary);
+    assert_eq!(c.active.as_ref().unwrap().task_id, temporary);
+    assert_eq!(c.pending[0].task_id, ids[1]);
+    assert_eq!(c.pending[0].elapsed_ms, 5000);
+    assert_eq!(c.pending[0].ended_at, c.active.as_ref().unwrap().started_at);
+    assert_eq!(c.next_id(), Some(ids[1]));
+    c.advance(at(10)).unwrap();
+    assert_eq!(
+        c.tasks
+            .iter()
+            .find(|t| t.id == temporary)
+            .unwrap()
+            .completed_at,
+        Some(at(10).wall)
+    );
+    assert_eq!(c.active.as_ref().unwrap().task_id, ids[1]);
+    assert_eq!(c.pending[1].elapsed_ms, 5000);
+    assert_eq!(c.pending[1].ended_at, c.active.as_ref().unwrap().started_at);
+    assert_eq!(c.queue().iter().map(|t| t.id).collect::<Vec<_>>(), ids);
+    c.advance(at(11)).unwrap();
+    assert_eq!(c.selected, Some(ids[2]));
+}
+
+#[test]
+fn temporary_task_starts_while_paused_and_completes_on_direct_switch() {
+    let mut c = core();
+    let ids = tasks(&mut c);
+    let temporary = c.add_temporary_task("Meeting", at(0)).unwrap();
+    assert!(c.active.is_some());
+    c.tick(at(3));
+    c.pause("Break");
+    assert!(c.current().unwrap().completed_at.is_none());
+    assert!(c.current().unwrap().temporary);
+    c.select(ids[2], at(5)).unwrap();
+    assert!(c.active.is_none());
+    assert_eq!(
+        c.tasks
+            .iter()
+            .find(|t| t.id == temporary)
+            .unwrap()
+            .completed_at,
+        Some(at(5).wall)
+    );
+    assert_eq!(c.pending[0].elapsed_ms, 3000);
+    assert_eq!(c.selected, Some(ids[2]));
+    assert_eq!(c.next_id(), Some(ids[3]));
+}
+
+#[test]
+fn single_and_consecutive_temporary_tasks_complete_without_repeating() {
+    let mut c = core();
+    let first = c.add_temporary_task("Meeting", at(0)).unwrap();
+    let second = c.add_temporary_task("Urgent call", at(3)).unwrap();
+    assert_eq!(
+        c.tasks.iter().find(|t| t.id == first).unwrap().completed_at,
+        Some(at(3).wall)
+    );
+    assert_eq!(c.current().unwrap().id, second);
+    c.advance(at(7)).unwrap();
+    assert!(c.current().is_none());
+    assert!(c.active.is_none());
+    assert!(c.queue().is_empty());
+    assert_eq!(
+        c.pending.iter().map(|s| s.elapsed_ms).collect::<Vec<_>>(),
+        [3000, 4000]
+    );
+    assert!(
+        c.tasks
+            .iter()
+            .all(|t| t.temporary && t.completed_at.is_some())
+    );
+}
+
+#[test]
+fn invalid_temporary_tasks_do_not_interrupt_work() {
+    let mut c = core();
+    tasks(&mut c);
+    c.start(at(0)).unwrap();
+    let session = c.active.as_ref().unwrap().id;
+    assert!(c.add_temporary_task("  ", at(1)).is_err());
+    assert_eq!(c.tasks.len(), 4);
+    assert_eq!(c.active.as_ref().unwrap().id, session);
+    let local = at(2).wall.with_timezone(&Local);
+    c.settings.exclusions.push(Exclusion {
+        id: Uuid::new_v4(),
+        days: vec![0, 1, 2, 3, 4, 5, 6],
+        start: (local - Duration::minutes(1)).time(),
+        end: (local + Duration::minutes(1)).time(),
+    });
+    assert!(c.add_temporary_task("Meeting", at(2)).is_err());
+    assert_eq!(c.tasks.len(), 4);
+    assert_eq!(c.active.as_ref().unwrap().id, session);
+    assert!(c.pending.is_empty());
+}
+
+#[test]
+fn temporary_tasks_keep_behavior_and_history_across_restart() {
+    let mut store = Store::in_memory().unwrap();
+    let mut c = core();
+    let ids = tasks(&mut c);
+    store.save(&mut c).unwrap();
+    c.select(ids[1], at(0)).unwrap();
+    let temporary = c.add_temporary_task("Meeting", at(0)).unwrap();
+    c.tick(at(5));
+    store.save(&mut c).unwrap();
+    let mut recovered = store.load().unwrap();
+    assert!(recovered.active.is_none());
+    assert_eq!(recovered.current().unwrap().id, temporary);
+    assert!(recovered.current().unwrap().temporary);
+    assert_eq!(recovered.next_id(), Some(ids[1]));
+    recovered.advance(at(6)).unwrap();
+    assert_eq!(recovered.selected, Some(ids[1]));
+    assert!(recovered.active.is_none());
+    store.save(&mut recovered).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.queue().iter().map(|t| t.id).collect::<Vec<_>>(), ids);
+    let task = loaded.tasks.iter().find(|t| t.id == temporary).unwrap();
+    assert_eq!(task.completed_at, Some(at(6).wall));
+    let report = report::load(&store, &loaded.tasks, at(0).wall, at(60).wall).unwrap();
+    assert_eq!(report.total_ms, 5000);
+    assert_eq!(report.totals[0].task_id, temporary);
+    let mut csv = vec![];
+    report::write_csv(&report, Export::Sessions, &mut csv).unwrap();
+    assert!(String::from_utf8(csv).unwrap().contains("Meeting"));
+}
+
+#[test]
+fn version_two_database_keeps_completed_tasks_when_adding_temporary_support() {
+    let directory = std::env::temp_dir().join(format!("workcircuit-migration-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("workcircuit.db");
+    let id = Uuid::new_v4();
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/002_task_completion.sql"))
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tasks VALUES(?1,'Completed task','Keep this',0,0,?2,?2)",
+                rusqlite::params![id.to_string(), at(0).wall.to_rfc3339()],
+            )
+            .unwrap();
+    }
+    {
+        let mut store = Store::open(&path).unwrap();
+        let c = store.load().unwrap();
+        assert_eq!(c.tasks[0].id, id);
+        assert_eq!(c.tasks[0].completed_at, Some(at(0).wall));
+        assert!(!c.tasks[0].temporary);
+        assert!(c.queue().is_empty());
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn completion_continues_rotation_without_losing_time() {
+    let mut c = core();
+    let ids = tasks(&mut c);
+    c.select(ids[2], at(0)).unwrap();
+    c.start(at(0)).unwrap();
+    c.complete(ids[2], at(5)).unwrap();
+    assert_eq!(c.tasks[2].completed_at, Some(at(5).wall));
+    assert!(!c.tasks[2].archived);
+    assert_eq!(c.selected, Some(ids[3]));
+    assert_eq!(c.pending[0].elapsed_ms, 5000);
+    assert_eq!(c.pending[0].ended_at, c.active.as_ref().unwrap().started_at);
+    assert!(!c.pending[0].open);
+    assert_eq!(c.active.as_ref().unwrap().task_id, ids[3]);
+    assert_eq!(c.visit_ms, 0);
+    assert!(c.select(ids[2], at(6)).is_err());
+    assert!(c.complete(ids[2], at(6)).is_err());
+    c.advance(at(7)).unwrap();
+    assert_eq!(c.selected, Some(ids[0]));
+    c.advance(at(8)).unwrap();
+    assert_eq!(c.selected, Some(ids[1]));
+    c.advance(at(9)).unwrap();
+    assert_eq!(c.selected, Some(ids[3]));
+}
+
+#[test]
+fn completing_another_task_preserves_current_session_and_pause_state() {
+    let mut c = core();
+    let ids = tasks(&mut c);
+    c.start(at(0)).unwrap();
+    let session = c.active.as_ref().unwrap().id;
+    c.complete(ids[2], at(3)).unwrap();
+    assert_eq!(c.selected, Some(ids[0]));
+    assert_eq!(c.active.as_ref().unwrap().id, session);
+    assert_eq!(c.active.as_ref().unwrap().elapsed_ms, 3000);
+    assert!(c.pending.is_empty());
+    c.tick(at(4));
+    c.pause("Break");
+    c.complete(ids[0], at(5)).unwrap();
+    assert_eq!(c.selected, Some(ids[1]));
+    assert!(c.active.is_none());
+    assert_eq!(c.pending[0].elapsed_ms, 4000);
+    assert_eq!(c.queue().len(), 2);
+}
+
+#[test]
+fn completing_last_task_stops_tracking_and_reopening_preserves_identity() {
+    let mut c = core();
+    let id = c.add_task("Only task", "Keep this", at(0).wall).unwrap();
+    c.start(at(0)).unwrap();
+    c.complete(id, at(5)).unwrap();
+    assert!(c.active.is_none());
+    assert!(c.selected.is_none());
+    assert!(c.queue().is_empty());
+    assert_eq!(c.pending[0].elapsed_ms, 5000);
+    assert!(c.start(at(6)).is_err());
+    assert!(c.advance(at(6)).is_err());
+    c.restore(id, at(7).wall);
+    assert_eq!(c.selected, Some(id));
+    assert!(c.active.is_none());
+    assert!(c.tasks[0].completed_at.is_none());
+    assert_eq!(c.tasks[0].description, "Keep this");
+    assert_eq!(c.pending[0].task_id, id);
+    c.start(at(8)).unwrap();
+}
+
+#[test]
+fn completion_during_scheduled_break_does_not_start_next_task() {
+    let mut c = core();
+    let ids = tasks(&mut c);
+    let start = Local
+        .with_ymd_and_hms(2026, 10, 13, 11, 59, 58)
+        .unwrap()
+        .with_timezone(&Utc);
+    let sample = |sec: u64| Sample {
+        wall: start + Duration::seconds(sec as i64),
+        mono_ms: sec * 1000,
+    };
+    c.settings.exclusions.push(Exclusion {
+        id: Uuid::new_v4(),
+        days: vec![0, 1, 2, 3, 4],
+        start: NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+        end: NaiveTime::from_hms_opt(13, 0, 0).unwrap(),
+    });
+    c.start(sample(0)).unwrap();
+    c.complete(ids[0], sample(4)).unwrap();
+    assert!(c.active.is_none());
+    assert_eq!(c.selected, Some(ids[1]));
+    assert_eq!(c.pending[0].elapsed_ms, 2000);
+    assert_eq!(c.pending[0].ended_at, sample(2).wall);
+}
+
+#[test]
+fn completed_tasks_persist_and_remain_in_reports_and_exports() {
+    let mut store = Store::in_memory().unwrap();
+    let mut c = core();
+    let ids = tasks(&mut c);
+    c.start(at(0)).unwrap();
+    c.complete(ids[0], at(5)).unwrap();
+    store.save(&mut c).unwrap();
+    let mut loaded = store.load().unwrap();
+    assert_eq!(loaded.tasks[0].completed_at, Some(at(5).wall));
+    assert_eq!(loaded.selected, Some(ids[1]));
+    assert_eq!(loaded.queue().len(), 3);
+    let report = report::load(&store, &loaded.tasks, at(0).wall, at(60).wall).unwrap();
+    assert_eq!(report.total_ms, 5000);
+    assert_eq!(report.totals[0].task_id, ids[0]);
+    let mut csv = vec![];
+    report::write_csv(&report, Export::Totals, &mut csv).unwrap();
+    let row = csv::Reader::from_reader(csv.as_slice())
+        .records()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(&row[1], "A");
+    loaded.restore(ids[0], at(6).wall);
+    assert_eq!(loaded.queue().last().unwrap().id, ids[0]);
+    store.save(&mut loaded).unwrap();
+    assert!(
+        store
+            .load()
+            .unwrap()
+            .tasks
+            .iter()
+            .all(|t| t.completed_at.is_none())
+    );
+}
+
+#[test]
+fn version_one_database_migrates_without_losing_tasks_or_sessions() {
+    let directory = std::env::temp_dir().join(format!("workcircuit-migration-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("workcircuit.db");
+    let id = Uuid::new_v4();
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tasks VALUES(?1,'Existing task','Keep history',0,0,?2)",
+                rusqlite::params![
+                    id.to_string(),
+                    at(0)
+                        .wall
+                        .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions VALUES(?1,?2,?3,?4,5000,0)",
+                rusqlite::params![
+                    Uuid::new_v4().to_string(),
+                    id.to_string(),
+                    at(0).wall.to_rfc3339(),
+                    at(5).wall.to_rfc3339()
+                ],
+            )
+            .unwrap();
+    }
+    {
+        let mut store = Store::open(&path).unwrap();
+        let mut c = store.load().unwrap();
+        assert_eq!(c.selected, Some(id));
+        assert!(c.tasks[0].completed_at.is_none());
+        assert_eq!(c.tasks[0].description, "Keep history");
+        c.complete(id, at(0)).unwrap();
+        store.save(&mut c).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.tasks[0].completed_at, Some(at(0).wall));
+        assert!(loaded.selected.is_none());
+        let report = report::load(&store, &loaded.tasks, at(0).wall, at(60).wall).unwrap();
+        assert_eq!(report.total_ms, 5000);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn reminder_survives_pause_and_resets_on_switch() {
     let mut c = core();
     let ids = tasks(&mut c);

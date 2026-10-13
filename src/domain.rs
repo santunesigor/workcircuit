@@ -10,7 +10,17 @@ pub struct Task {
     pub description: String,
     pub position: i64,
     pub archived: bool,
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub temporary: bool,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Task {
+    pub fn is_active(&self) -> bool {
+        !self.archived && self.completed_at.is_none()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,7 +143,7 @@ impl Core {
     pub fn new(tasks: Vec<Task>, settings: Settings) -> Self {
         let selected = tasks
             .iter()
-            .filter(|t| !t.archived)
+            .filter(|t| t.is_active())
             .min_by_key(|t| t.position)
             .map(|t| t.id);
         Self {
@@ -150,7 +160,7 @@ impl Core {
     }
 
     pub fn queue(&self) -> Vec<&Task> {
-        let mut tasks: Vec<_> = self.tasks.iter().filter(|t| !t.archived).collect();
+        let mut tasks: Vec<_> = self.tasks.iter().filter(|t| t.is_active()).collect();
         tasks.sort_by_key(|t| t.position);
         tasks
     }
@@ -158,7 +168,7 @@ impl Core {
     pub fn current(&self) -> Option<&Task> {
         self.tasks
             .iter()
-            .find(|t| Some(t.id) == self.selected && !t.archived)
+            .find(|t| Some(t.id) == self.selected && t.is_active())
     }
 
     pub fn next_id(&self) -> Option<Uuid> {
@@ -191,11 +201,37 @@ impl Core {
             description: description.trim().into(),
             position,
             archived: false,
+            completed_at: None,
+            temporary: false,
             updated_at: at,
         });
         if self.selected.is_none() {
             self.selected = Some(id);
         }
+        Ok(id)
+    }
+
+    pub fn add_temporary_task(&mut self, title: &str, now: Sample) -> Result<Uuid> {
+        if self.blocked(now.wall) {
+            bail!("Scheduled break — resume after it ends");
+        }
+        let position = self.current().map(|task| task.position);
+        let id = self.add_task(title, "", now.wall)?;
+        if let Some(position) = position {
+            for task in self.tasks.iter_mut().filter(|task| task.id != id) {
+                if task.position >= position {
+                    task.position += 1;
+                    task.updated_at = now.wall;
+                }
+            }
+        }
+        let task = self.tasks.iter_mut().find(|task| task.id == id).unwrap();
+        task.temporary = true;
+        if let Some(position) = position {
+            task.position = position;
+        }
+        self.select(id, now)?;
+        self.start(now)?;
         Ok(id)
     }
 
@@ -240,7 +276,33 @@ impl Core {
         }
     }
 
+    pub fn complete(&mut self, id: Uuid, now: Sample) -> Result<()> {
+        let index = self
+            .tasks
+            .iter()
+            .position(|t| t.id == id && t.is_active())
+            .ok_or_else(|| anyhow::anyhow!("Task is not in the active queue"))?;
+        self.tick(now);
+        let current = self.selected == Some(id);
+        let running = self.active.is_some();
+        let next = self.next_id().filter(|next| *next != id);
+        self.tasks[index].completed_at = Some(now.wall);
+        self.tasks[index].updated_at = now.wall;
+        if current {
+            self.pause("Task completed");
+            self.selected = next;
+            self.reset_visit();
+            if running && next.is_some() {
+                self.start(now)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn archive(&mut self, id: Uuid, now: Sample) {
+        if !self.tasks.iter().any(|t| t.id == id && t.is_active()) {
+            return;
+        }
         self.tick(now);
         if self.selected == Some(id) {
             self.pause("Task archived");
@@ -257,6 +319,7 @@ impl Core {
         let position = self.tasks.iter().map(|t| t.position).max().unwrap_or(-1) + 1;
         if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
             task.archived = false;
+            task.completed_at = None;
             task.position = position;
             task.updated_at = at;
             if self.selected.is_none() {
@@ -272,14 +335,23 @@ impl Core {
 
     pub fn select(&mut self, id: Uuid, now: Sample) -> Result<()> {
         self.tick(now);
-        if !self.tasks.iter().any(|t| t.id == id && !t.archived) {
+        if !self.tasks.iter().any(|t| t.id == id && t.is_active()) {
             bail!("Task is not in the active queue");
         }
         if self.selected == Some(id) {
             return Ok(());
         }
         let running = self.active.is_some();
+        let temporary = self
+            .current()
+            .filter(|task| task.temporary)
+            .map(|task| task.id);
         self.finish();
+        if let Some(id) = temporary {
+            let task = self.tasks.iter_mut().find(|task| task.id == id).unwrap();
+            task.completed_at = Some(now.wall);
+            task.updated_at = now.wall;
+        }
         self.selected = Some(id);
         self.reset_visit();
         if running {
@@ -289,6 +361,9 @@ impl Core {
     }
 
     pub fn advance(&mut self, now: Sample) -> Result<()> {
+        if let Some(task) = self.current().filter(|task| task.temporary) {
+            return self.complete(task.id, now);
+        }
         let id = self
             .next_id()
             .ok_or_else(|| anyhow::anyhow!("Add a task first"))?;

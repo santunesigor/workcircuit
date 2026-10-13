@@ -32,6 +32,11 @@ impl Language {
             "Next →" => "Próxima →",
             "Task rotation" => "Rotação de tarefas",
             "Add Task" => "Adicionar tarefa",
+            "Temporary Task" => "Tarefa temporária",
+            "Start Now" => "Iniciar agora",
+            "Starts now and completes when you switch tasks." => {
+                "Começa agora e é concluída quando você troca de tarefa."
+            }
             "Add a task to get started" => "Adicione uma tarefa para começar",
             "Scheduled break · resume afterwards" => "Intervalo agendado · retome depois",
             "Up next:" => "A seguir:",
@@ -44,6 +49,10 @@ impl Language {
             "Move up" => "Mover para cima",
             "Move down" => "Mover para baixo",
             "Edit task" => "Editar tarefa",
+            "Complete" => "Concluir",
+            "Complete task" => "Concluir tarefa",
+            "Completed tasks" => "Tarefas concluídas",
+            "Reopen" => "Reabrir",
             "Archive task (preserves history)" => "Arquivar tarefa (preserva o histórico)",
             "Archived tasks" => "Tarefas arquivadas",
             "Restore" => "Restaurar",
@@ -101,6 +110,7 @@ impl Language {
             "Paused for system sleep" => "Pausado pela suspensão do sistema",
             "Session ended" => "Sessão encerrada",
             "Task archived" => "Tarefa arquivada",
+            "Task completed" => "Tarefa concluída",
             "Scheduled break — resume manually afterwards" => {
                 "Intervalo agendado — retome manualmente depois"
             }

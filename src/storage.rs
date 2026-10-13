@@ -47,12 +47,18 @@ impl Store {
             "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
         )?;
         let version: i64 = connection.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 1 {
+        if version > 3 {
             bail!("Database was created by a newer WorkCircuit version");
         }
-        if version == 0 {
+        if version < 3 {
             let tx = connection.transaction()?;
-            tx.execute_batch(include_str!("../migrations/001_initial.sql"))?;
+            if version == 0 {
+                tx.execute_batch(include_str!("../migrations/001_initial.sql"))?;
+            }
+            if version < 2 {
+                tx.execute_batch(include_str!("../migrations/002_task_completion.sql"))?;
+            }
+            tx.execute_batch(include_str!("../migrations/003_temporary_tasks.sql"))?;
             tx.commit()?;
         }
         Ok(Self { connection })
@@ -64,7 +70,7 @@ impl Store {
             .execute("UPDATE sessions SET open=0 WHERE open=1", [])?;
         let mut tasks = vec![];
         let mut stmt = self.connection.prepare(
-            "SELECT id,title,description,position,archived,updated_at FROM tasks ORDER BY position",
+            "SELECT id,title,description,position,archived,updated_at,completed_at,temporary FROM tasks ORDER BY position",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -74,16 +80,21 @@ impl Store {
                 row.get::<_, i64>(3)?,
                 row.get::<_, bool>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, bool>(7)?,
             ))
         })?;
         for row in rows {
-            let (id, title, description, position, archived, updated_at) = row?;
+            let (id, title, description, position, archived, updated_at, completed_at, temporary) =
+                row?;
             tasks.push(Task {
                 id: Uuid::parse_str(&id)?,
                 title,
                 description,
                 position,
                 archived,
+                completed_at: completed_at.map(|s| parse_time(&s)).transpose()?,
+                temporary,
                 updated_at: parse_time(&updated_at)?,
             });
         }
@@ -111,7 +122,7 @@ impl Store {
             .optional()?;
         let mut core = Core::new(tasks, settings);
         if let Some(id) = selected.and_then(|s| Uuid::parse_str(&s).ok())
-            && core.tasks.iter().any(|t| t.id == id && !t.archived)
+            && core.tasks.iter().any(|t| t.id == id && t.is_active())
         {
             core.selected = Some(id);
         }
@@ -125,7 +136,7 @@ impl Store {
     pub fn save(&mut self, core: &mut Core) -> Result<()> {
         let tx = self.connection.transaction()?;
         {
-            let mut stmt = tx.prepare("INSERT INTO tasks(id,title,description,position,archived,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,position=excluded.position,archived=excluded.archived,updated_at=excluded.updated_at WHERE tasks.updated_at != excluded.updated_at")?;
+            let mut stmt = tx.prepare("INSERT INTO tasks(id,title,description,position,archived,updated_at,completed_at,temporary) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,position=excluded.position,archived=excluded.archived,updated_at=excluded.updated_at,completed_at=excluded.completed_at,temporary=excluded.temporary WHERE tasks.updated_at != excluded.updated_at OR tasks.completed_at IS NOT excluded.completed_at OR tasks.position != excluded.position OR tasks.temporary != excluded.temporary")?;
             for task in &core.tasks {
                 stmt.execute(params![
                     task.id.to_string(),
@@ -133,7 +144,9 @@ impl Store {
                     task.description,
                     task.position,
                     task.archived,
-                    sql_time(task.updated_at)
+                    sql_time(task.updated_at),
+                    task.completed_at.map(sql_time),
+                    task.temporary
                 ])?;
             }
         }

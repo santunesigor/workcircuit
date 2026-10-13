@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate, NaiveTime, Utc};
 use gtk::{gio, glib};
 use std::{
@@ -24,6 +24,8 @@ struct View {
     next_label: gtk::Label,
     toggle: gtk::Button,
     next: gtk::Button,
+    complete: gtk::Button,
+    temporary: gtk::Button,
     tasks: gtk::ListBox,
     compact: bool,
 }
@@ -391,6 +393,16 @@ impl Desktop {
         });
         controls.append(&toggle);
         controls.append(&next);
+        let complete = gtk::Button::with_label(lang.text("Complete"));
+        complete.set_tooltip_text(Some(lang.text("Complete task")));
+        let d = self.clone();
+        complete.connect_clicked(move |_| {
+            d.apply(|core, now| {
+                let id = core.current().context("Add or select a task first")?.id;
+                core.complete(id, now)
+            });
+        });
+        controls.append(&complete);
         body.append(&controls);
         let next_label = gtk::Label::new(None);
         next_label.add_css_class("dim-label");
@@ -406,6 +418,10 @@ impl Desktop {
         let d = self.clone();
         add.connect_clicked(move |_| d.task_dialog(None));
         row.append(&add);
+        let temporary = gtk::Button::with_label(lang.text("Temporary Task"));
+        let d = self.clone();
+        temporary.connect_clicked(move |_| d.temporary_task_dialog());
+        row.append(&temporary);
         body.append(&row);
         let tasks = gtk::ListBox::new();
         tasks.set_selection_mode(gtk::SelectionMode::None);
@@ -429,6 +445,8 @@ impl Desktop {
             next_label,
             toggle,
             next,
+            complete,
+            temporary,
             tasks,
             compact: false,
         }
@@ -456,6 +474,19 @@ impl Desktop {
         title.set_max_width_chars(22);
         title.add_css_class("heading");
         header.append(&title);
+        let temporary = icon_button("list-add-symbolic", lang.text("Temporary Task"));
+        let d = self.clone();
+        temporary.connect_clicked(move |_| d.temporary_task_dialog());
+        header.append(&temporary);
+        let complete = icon_button("object-select-symbolic", lang.text("Complete task"));
+        let d = self.clone();
+        complete.connect_clicked(move |_| {
+            d.apply(|core, now| {
+                let id = core.current().context("Add or select a task first")?.id;
+                core.complete(id, now)
+            });
+        });
+        header.append(&complete);
         let tasks = gtk::ListBox::new();
         tasks.set_selection_mode(gtk::SelectionMode::None);
         tasks.add_css_class("boxed-list");
@@ -533,6 +564,8 @@ impl Desktop {
             next_label,
             toggle,
             next,
+            complete,
+            temporary,
             tasks,
             compact: true,
         }
@@ -629,6 +662,10 @@ impl Desktop {
                 .set_sensitive(core.current().is_some() && !blocked && !self.write_failed.get());
             view.next
                 .set_sensitive(core.current().is_some() && !self.write_failed.get());
+            view.complete
+                .set_sensitive(core.current().is_some() && !self.write_failed.get());
+            view.temporary
+                .set_sensitive(!blocked && !self.write_failed.get());
             if rebuild {
                 while let Some(child) = view.tasks.first_child() {
                     view.tasks.remove(&child);
@@ -648,6 +685,9 @@ impl Desktop {
                     // ActionRow titles are markup by default; task text must remain literal.
                     row.set_use_markup(false);
                     row.set_title(&task.title);
+                    if !compact && task.temporary {
+                        row.set_subtitle(lang.text("Temporary Task"));
+                    }
                     if !compact && !task.description.is_empty() {
                         row.set_subtitle(&task.description);
                         row.set_subtitle_lines(2);
@@ -700,6 +740,13 @@ impl Desktop {
                         let task = task.clone();
                         edit.connect_clicked(move |_| d.task_dialog(Some(task.clone())));
                         row.add_suffix(&edit);
+                        let complete =
+                            icon_button("object-select-symbolic", lang.text("Complete task"));
+                        let d = self.clone();
+                        complete.connect_clicked(move |_| {
+                            d.apply(|core, now| core.complete(id, now));
+                        });
+                        row.add_suffix(&complete);
                         let archive = icon_button(
                             "user-trash-symbolic",
                             lang.text("Archive task (preserves history)"),
@@ -714,6 +761,29 @@ impl Desktop {
                         row.add_suffix(&archive);
                     }
                     view.tasks.append(&row);
+                }
+                if !compact && core.tasks.iter().any(|t| t.completed_at.is_some()) {
+                    let completed = adw::ExpanderRow::builder()
+                        .title(lang.text("Completed tasks"))
+                        .build();
+                    for task in core.tasks.iter().filter(|t| t.completed_at.is_some()) {
+                        let row = adw::ActionRow::new();
+                        row.set_use_markup(false);
+                        row.set_title(&task.title);
+                        let reopen = gtk::Button::with_label(lang.text("Reopen"));
+                        reopen.set_valign(gtk::Align::Center);
+                        let d = self.clone();
+                        let id = task.id;
+                        reopen.connect_clicked(move |_| {
+                            d.apply(|core, now| {
+                                core.restore(id, now.wall);
+                                Ok(())
+                            });
+                        });
+                        row.add_suffix(&reopen);
+                        completed.add_row(&row);
+                    }
+                    view.tasks.append(&completed);
                 }
                 if !compact && core.tasks.iter().any(|t| t.archived) {
                     let archived = adw::ExpanderRow::builder()
@@ -740,6 +810,44 @@ impl Desktop {
                 }
             }
         }
+    }
+
+    fn temporary_task_dialog(self: &Rc<Self>) {
+        let lang = self.core.borrow().settings.language;
+        let dialog = self.editor_window(lang.text("Temporary Task"), 420, 200);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 16);
+        margins(&body, 24);
+        let title = gtk::Entry::builder()
+            .placeholder_text(lang.text("Task title (required)"))
+            .activates_default(true)
+            .build();
+        let hint = gtk::Label::new(Some(
+            lang.text("Starts now and completes when you switch tasks."),
+        ));
+        hint.set_wrap(true);
+        hint.set_xalign(0.0);
+        hint.add_css_class("dim-label");
+        let start = gtk::Button::with_label(lang.text("Start Now"));
+        start.add_css_class("suggested-action");
+        start.set_sensitive(false);
+        let button = start.clone();
+        title.connect_changed(move |entry| button.set_sensitive(!entry.text().trim().is_empty()));
+        body.append(&title);
+        body.append(&hint);
+        body.append(&start);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.append(&adw::HeaderBar::new());
+        root.append(&body);
+        dialog.set_content(Some(&root));
+        dialog.set_default_widget(Some(&start));
+        let d = self.clone();
+        let window = dialog.clone();
+        start.connect_clicked(move |_| {
+            if d.apply(|core, now| core.add_temporary_task(&title.text(), now).map(|_| ())) {
+                window.close();
+            }
+        });
+        dialog.present();
     }
 
     fn task_dialog(self: &Rc<Self>, task: Option<Task>) {
@@ -1511,6 +1619,61 @@ mod tests {
         let toggle = d.overlay.borrow().as_ref().unwrap().toggle.clone();
         toggle.emit_clicked();
         assert!(d.core.borrow().active.is_some());
+        let completed_id = d.core.borrow().selected.unwrap();
+        let next_id = d.core.borrow().next_id().unwrap();
+        button(&main, "Complete").emit_clicked();
+        pump();
+        assert!(d.core.borrow().tasks.iter().any(|task| {
+            task.id == completed_id && task.completed_at.is_some() && !task.archived
+        }));
+        assert_eq!(d.core.borrow().selected, Some(next_id));
+        assert!(d.core.borrow().active.is_some());
+        assert!(
+            find::<adw::ExpanderRow>(main.upcast_ref())
+                .iter()
+                .any(|row| row.title() == "Completed tasks")
+        );
+        button(&main, "Reopen").emit_clicked();
+        assert_eq!(d.core.borrow().queue().last().unwrap().id, completed_id);
+        let interrupted_id = d.core.borrow().selected.unwrap();
+        let interrupted_session = d.core.borrow().active.as_ref().unwrap().id;
+        button(&main, "Temporary Task").emit_clicked();
+        pump();
+        let temporary_editor = dialog("Temporary Task");
+        assert!(!button(&temporary_editor, "Start Now").is_sensitive());
+        assert_eq!(find::<gtk::Entry>(temporary_editor.upcast_ref()).len(), 1);
+        assert!(find::<gtk::TextView>(temporary_editor.upcast_ref()).is_empty());
+        temporary_editor.close();
+        assert_eq!(
+            d.core.borrow().active.as_ref().unwrap().id,
+            interrupted_session
+        );
+        button(&main, "Temporary Task").emit_clicked();
+        pump();
+        let temporary_editor = dialog("Temporary Task");
+        find::<gtk::Entry>(temporary_editor.upcast_ref())[0].set_text("Unexpected meeting");
+        button(&temporary_editor, "Start Now").emit_clicked();
+        pump();
+        let temporary_id = d.core.borrow().selected.unwrap();
+        assert!(d.core.borrow().current().unwrap().temporary);
+        assert_eq!(
+            d.core.borrow().active.as_ref().unwrap().task_id,
+            temporary_id
+        );
+        button(&main, "Next →").emit_clicked();
+        assert_eq!(d.core.borrow().selected, Some(interrupted_id));
+        assert!(
+            d.core
+                .borrow()
+                .tasks
+                .iter()
+                .any(|task| { task.id == temporary_id && task.completed_at.is_some() })
+        );
+        button(&main, "Reopen").emit_clicked();
+        d.apply(|core, now| {
+            core.archive(temporary_id, now);
+            Ok(())
+        });
         let session_id = d.core.borrow().active.as_ref().unwrap().id;
         button(&main, "Settings").emit_clicked();
         pump();
@@ -1539,6 +1702,54 @@ mod tests {
             overlay.height()
         );
         crate::overlay::assert_above_if_managed(&overlay);
+        let completed_id = d.core.borrow().selected.unwrap();
+        let complete = d.overlay.borrow().as_ref().unwrap().complete.clone();
+        assert_eq!(complete.tooltip_text().as_deref(), Some("Concluir tarefa"));
+        complete.emit_clicked();
+        pump();
+        assert!(
+            d.core
+                .borrow()
+                .tasks
+                .iter()
+                .any(|task| { task.id == completed_id && task.completed_at.is_some() })
+        );
+        assert!(d.core.borrow().active.is_some());
+        button(&main, "Reabrir").emit_clicked();
+        assert!(
+            d.core
+                .borrow()
+                .tasks
+                .iter()
+                .all(|task| task.completed_at.is_none())
+        );
+        let interrupted_id = d.core.borrow().selected.unwrap();
+        let temporary = d.overlay.borrow().as_ref().unwrap().temporary.clone();
+        assert_eq!(
+            temporary.tooltip_text().as_deref(),
+            Some("Tarefa temporária")
+        );
+        temporary.emit_clicked();
+        pump();
+        let temporary_editor = dialog("Tarefa temporária");
+        find::<gtk::Entry>(temporary_editor.upcast_ref())[0].set_text("Reunião de última hora");
+        button(&temporary_editor, "Iniciar agora").emit_clicked();
+        pump();
+        let temporary_id = d.core.borrow().selected.unwrap();
+        assert!(d.core.borrow().current().unwrap().temporary);
+        assert_eq!(
+            d.core.borrow().active.as_ref().unwrap().task_id,
+            temporary_id
+        );
+        button(&overlay, "Próxima →").emit_clicked();
+        assert_eq!(d.core.borrow().selected, Some(interrupted_id));
+        assert!(
+            d.core
+                .borrow()
+                .tasks
+                .iter()
+                .any(|task| { task.id == temporary_id && task.completed_at.is_some() })
+        );
         main.close();
         pump();
         assert!(d.dashboard.borrow().is_none());

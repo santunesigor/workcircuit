@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Start a temporary task from just a name in the dashboard or companion. It runs immediately, completes on Next or a direct task switch, and returns to interrupted work without changing the regular rotation order.
+- Persist temporary-task behavior across restarts and keep meeting time in reports and CSV exports.
+- Add a Brazilian Portuguese README with language links and include it in release packages.
+- Complete tasks from the dashboard, task rows or compact companion; keep them outside the active rotation with their existing time history.
+- Reopen completed tasks at the end of the queue. Completing a running task continues with the next task; paused tracking stays paused and finishing the last task stops tracking.
+- Migrate existing databases automatically to store task completion timestamps.
+
 ## 0.1.0 — 2026-10-13
 
 First Linux desktop release.

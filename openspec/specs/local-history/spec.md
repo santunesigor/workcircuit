@@ -12,6 +12,14 @@ Tasks, ordering, descriptions, sessions, exclusions and preferences SHALL persis
 - **WHEN** the app restarts with no network
 - **THEN** tasks and settings are restored and tracking is paused
 
+#### Scenario: Upgrade a database with existing history
+- **WHEN** a database from version 0.1.0 is opened by a version supporting task completion
+- **THEN** it is migrated transactionally, retaining tasks, archival state, preferences and sessions; existing tasks have no completion timestamp
+
+#### Scenario: Upgrade a database with completed tasks
+- **WHEN** a database supporting completion is opened by a version supporting temporary tasks
+- **THEN** it is migrated transactionally with completion timestamps and history retained; existing tasks are regular tasks by default
+
 ### Requirement: Period reporting
 Reports SHALL show totals by task, a grand total and session history for an inclusive local-date range, counting only the contribution inside that range.
 
