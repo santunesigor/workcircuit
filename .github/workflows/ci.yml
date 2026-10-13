@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libadwaita-1-dev xvfb dbus-x11 desktop-file-utils
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --component rust-docs
+          rustup default stable
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Check code
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test core
+        run: cargo test --locked
+      - name: Test desktop controls
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          GTK_A11Y: none
+          GTK_USE_PORTAL: "0"
+          GIO_USE_VFS: local
+        run: dbus-run-session -- xvfb-run -a cargo test --bin workcircuit --locked -- --ignored --test-threads=1
+      - name: Build release
+        run: cargo build --release --locked
+      - name: Package and verify installation
+        run: |
+          python3 scripts/package.py
+          tar -xzf dist/workcircuit-*-linux-x86_64.tar.gz -C "$RUNNER_TEMP"
+          DESTDIR="$RUNNER_TEMP/stage" PREFIX=/usr "$RUNNER_TEMP"/workcircuit-*-linux-x86_64/install.sh
+          desktop-file-validate "$RUNNER_TEMP/stage/usr/share/applications/io.github.workcircuit.WorkCircuit.desktop"
+          cd dist
+          sha256sum --check SHA256SUMS
+      - name: Upload release package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
