@@ -188,7 +188,3 @@ Planned separately:
 - Debian packages and APT repository publishing.
 - Snap packaging, confinement checks and publishing.
 - Optional personal cloud backup and multi-PC synchronization.
-
-## License
-
-No license is granted for WorkCircuit at this time. Public source availability does not grant permission to reuse, modify or redistribute this project's code. Third-party components retain their own licenses; release archives include their notices in `THIRD-PARTY-NOTICES.md` and `LICENSES/`.
