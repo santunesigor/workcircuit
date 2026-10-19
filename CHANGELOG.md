@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-19
 
+- Keep the overlay out of the taskbar and workspace pager so it acts as an extension of the main window instead of showing a second application icon.
 - Start a temporary task from just a name in the dashboard or companion. It runs immediately, completes on Next or a direct task switch, and returns to interrupted work without changing the regular rotation order.
 - Persist temporary-task behavior across restarts and keep meeting time in reports and CSV exports.
 - Add a Brazilian Portuguese README with language links and include it in release packages.

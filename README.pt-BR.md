@@ -6,9 +6,9 @@ Um aplicativo desktop para Linux que funciona offline, ajuda você a alternar en
 
 Enquanto uma IA trabalha em um projeto, você pode seguir para outro sem perder sua posição no fluxo. O WorkCircuit mantém uma rotação de tarefas, registra o tempo trabalhado e oferece uma minijanela que fica acima das outras janelas.
 
-**Última versão publicada: 0.1.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Histórico de alterações](CHANGELOG.md)
+**Última versão publicada: 0.2.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Histórico de alterações](CHANGELOG.md)
 
-A conclusão de tarefas e as tarefas temporárias estão disponíveis na compilação do código atual; ainda não estão incluídas no pacote da release 0.1.0. Sincronização na nuvem e distribuição por APT/Snap estão planejadas.
+Sincronização na nuvem e distribuição por APT/Snap estão planejadas.
 
 ## O que ele faz
 
@@ -30,8 +30,8 @@ Baixe o arquivo Linux x86_64 e o `SHA256SUMS` na [última release](https://githu
 ```sh
 sudo apt install libgtk-4-1 libadwaita-1-0 xwayland
 sha256sum --check SHA256SUMS
-tar -xzf workcircuit-0.1.0-linux-x86_64.tar.gz
-cd workcircuit-0.1.0-linux-x86_64
+tar -xzf workcircuit-0.2.0-linux-x86_64.tar.gz
+cd workcircuit-0.2.0-linux-x86_64
 ./install.sh
 ```
 
@@ -101,7 +101,7 @@ O tempo da reunião permanece em **Tarefas concluídas**, nos relatórios e nos 
 
 ### Minijanela no GNOME
 
-Pressione **Overlay / Minijanela** para abrir o painel compacto de aproximadamente 300 × 140 pixels. Ele solicita automaticamente a posição acima das janelas comuns. Arraste a área do nome para movê-lo, use a lista para selecionar tarefas e o botão de expandir para voltar ao painel principal.
+Pressione **Overlay / Minijanela** para abrir o painel compacto de aproximadamente 300 × 140 pixels. Ele solicita automaticamente a posição acima das janelas comuns e não cria um ícone próprio na barra de tarefas; só a janela principal aparece lá. Arraste a área do nome para movê-lo, use a lista para selecionar tarefas e o botão de expandir para voltar ao painel principal.
 
 No GNOME/Wayland, apenas a minijanela usa XWayland; o painel principal continua nativo. Aplicativos em tela cheia e superfícies do sistema seguem as regras do compositor. Se XWayland não estiver disponível, o app mostra uma orientação para instalá-lo ou ativá-lo.
 
@@ -147,7 +147,7 @@ Um único crate Rust separa as responsabilidades:
 | `report` | Recorte por período, agregação e CSV |
 | `ui` | Janelas GTK/libadwaita, notificações e suspensão |
 | `i18n` | Textos em inglês e português brasileiro |
-| `overlay` | Display X11 dedicado e solicitação de janela acima das demais |
+| `overlay` | Display X11 dedicado e solicitação de janela acima das demais e fora da barra de tarefas |
 
 O domínio não depende de GTK ou SQL. As duas janelas compartilham o mesmo controlador. Consultas por período usam índices e não há gravações por segundo no banco.
 
@@ -191,7 +191,3 @@ python3 scripts/package.py
 O pacote inclui instalador, documentação nos dois idiomas, checksum SHA-256 e avisos das dependências. É necessário o componente `rust-docs` do Rust para incluir seus avisos. Use Ubuntu 24.04 para gerar o binário distribuído: compilar em uma distribuição mais nova pode exigir bibliotecas mais recentes. Os arquivos gerados ficam em `dist/`, ignorado pelo Git. Empacotadores podem usar `PREFIX=/usr` e `DESTDIR` na instalação.
 
 Distribuição por APT/Snap, backup opcional na nuvem e sincronização entre PCs ficam para versões futuras.
-
-## Licença
-
-Nenhuma licença de reutilização é concedida para o WorkCircuit neste momento. A disponibilidade pública do código não concede permissão para reutilizá-lo, modificá-lo ou redistribuí-lo. Componentes de terceiros mantêm suas próprias licenças; os pacotes incluem seus avisos em `THIRD-PARTY-NOTICES.md` e `LICENSES/`.

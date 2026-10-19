@@ -6,9 +6,7 @@ A small offline Linux desktop companion for rotating between projects and knowin
 
 When an AI assistant is working on one project, move to the next without losing your place. WorkCircuit keeps an ordered task rotation, measures your work, and stays beside your other windows in a compact companion view.
 
-**Latest release: 0.1.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Changelog](CHANGELOG.md)
-
-Task completion and temporary tasks are currently available in the source build; they are not included in the 0.1.0 release archive.
+**Latest release: 0.2.0** · [Releases](https://github.com/santunesigor/workcircuit/releases) · [Changelog](CHANGELOG.md)
 
 Cloud synchronization and APT/Snap publishing are planned, not available.
 
@@ -33,8 +31,8 @@ Download the Linux x86_64 archive and `SHA256SUMS` from [the latest release](htt
 ```sh
 sudo apt install libgtk-4-1 libadwaita-1-0 xwayland
 sha256sum --check SHA256SUMS
-tar -xzf workcircuit-0.1.0-linux-x86_64.tar.gz
-cd workcircuit-0.1.0-linux-x86_64
+tar -xzf workcircuit-0.2.0-linux-x86_64.tar.gz
+cd workcircuit-0.2.0-linux-x86_64
 ./install.sh
 ```
 
@@ -86,7 +84,7 @@ Manual pauses, scheduled breaks, suspend and restart do not complete temporary w
 
 ### Companion window on GNOME
 
-Press **Overlay** to open the approximately 300 × 140 px companion. It requests **Always on Top** automatically, so no window-menu pinning is necessary. On GNOME/Wayland, only the companion uses XWayland and the standard EWMH above-state request; the dashboard stays native. This keeps it above ordinary windows, while fullscreen applications and system surfaces remain under the compositor's control.
+Press **Overlay** to open the approximately 300 × 140 px companion. It requests **Always on Top** automatically, so no window-menu pinning is necessary. On GNOME/Wayland, only the companion uses XWayland and the standard EWMH above-state request; the dashboard stays native. This keeps it above ordinary windows, while fullscreen applications and system surfaces remain under the compositor's control. The companion does not add its own taskbar icon; only the main window appears there.
 
 Drag the task-name area to move it, use the list button to choose a task, and use the expand button to reopen the dashboard. The task list lives in a popover instead of taking up the companion's height. If XWayland is unavailable, an actionable error is shown instead of presenting an unpinned window.
 
@@ -130,7 +128,7 @@ A single Rust crate keeps these boundaries:
 | `report` | Period clipping, aggregation and CSV |
 | `ui` | Native GTK/libadwaita windows, notifications and suspend integration |
 | `i18n` | Explicit English/Portuguese UI text selection |
-| `overlay` | Dedicated X11 display and standard always-on-top window hints |
+| `overlay` | Dedicated X11 display and standard always-on-top and skip-taskbar window hints |
 
 The domain has no GTK or SQL dependency. Both windows share one controller. Period queries use an index; there are no per-second database records.
 
