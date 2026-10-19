@@ -35,11 +35,15 @@ Closing one window SHALL retain tracking while the other remains open. Closing t
 - **THEN** the timer continues and the dashboard can be reopened
 
 ### Requirement: Small always-on-top companion
-The companion SHALL use a small fixed layout (approximately 300 by 140 logical pixels) with an ellipsized task title and task picker popover. It SHALL request above-state automatically, and display an actionable error if X11/XWayland is unavailable.
+The companion SHALL use a small fixed layout (approximately 300 by 140 logical pixels) with an ellipsized task title and task picker popover. It SHALL request above-state automatically, and display an actionable error if X11/XWayland is unavailable. It SHALL request skip-taskbar and skip-pager state so it behaves as an extension of the dashboard rather than a separate application window.
 
 #### Scenario: Dashboard receives focus
 - **WHEN** the user focuses the dashboard after opening the companion on GNOME/Wayland with XWayland
 - **THEN** the compositor retains the companion above ordinary windows
+
+#### Scenario: Single taskbar entry
+- **WHEN** the companion is open alongside the dashboard
+- **THEN** the taskbar shows only the dashboard's application entry, not a second one for the companion
 
 #### Scenario: Long task title
 - **WHEN** a task has a long title or many tasks exist
